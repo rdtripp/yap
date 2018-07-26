@@ -125,6 +125,10 @@ class UpgradeAdvisor {
         'twilio_auth_token',
         'bmlt_username',
         'bmlt_password',
+        'mysql_hostname',
+        'mysql_username',
+        'mysql_password',
+        'mysql_database'
     ];
 
     private static function isThere($setting) {
@@ -178,6 +182,12 @@ class UpgradeAdvisor {
 
         } catch ( \Twilio\Exceptions\ConfigurationException $e ) {
             error_log("Missing Twilio Credentials");
+        }
+
+        $conn = new mysqli($GLOBALS['mysql_hostname'], $GLOBALS['mysql_username'], $GLOBALS['mysql_password']);
+
+        if ($conn->connect_error) {
+            return UpgradeAdvisor::getState(false, "MySQL connection failed: " . $conn->connect_error);
         }
 
         if (UpgradeAdvisor::$all_good) {
