@@ -512,36 +512,43 @@ function getVolunteerRoutingEnabledServiceBodies() {
 }
 
 function getServiceBodyConfiguration($service_body_id) {
-    $helplineData = getHelplineData($service_body_id, DataType::YAP_CONFIG);
+    if (strpos(getHelplineBMLTRootServer(), 'tomato') && !isset($_REQUEST["o"])) {
+        $tomato_rest_uri = str_replace('/main_server/', '/rest/v1', getHelplineBMLTRootServer());
+        $tomato_service_body_response = json_decode(get($tomato_rest_uri . '/servicebodies/' . $service_body_id . '/?format=json'));
+        $original_service_body_id = $tomato_service_body_response->source_id;
+        $original_root_server = json_decode(get($tomato_service_body_response->root_server));
+        $mapped_yap_server = $GLOBALS['tomato_yap_map'][$original_root_server->root_server_url];
+        return json_decode(get($mapped_yap_server . 'service-body-config.php?o=1&service_body_id=' . $original_service_body_id));
+    } else {
+        $helplineData = getHelplineData( $service_body_id, DataType::YAP_CONFIG );
+        $config = new ServiceBodyConfiguration();
+        $config->service_body_id = $service_body_id;
+        if ( isset( $helplineData ) && count( $helplineData ) > 0 ) {
+            $data = $helplineData[0]['data'][0];
 
-    $config = new ServiceBodyConfiguration();
-    $config->service_body_id = $service_body_id;
-    if (isset($helplineData) && count($helplineData) > 0) {
-        $data = $helplineData[0]['data'][0];
-
-        foreach ($data as $key => $value) {
-            if (strpos($key, 'override_') === 0 && strlen($value) > 0) {
-                $_SESSION[$key] = $value;
+            foreach ( $data as $key => $value ) {
+                if ( strpos( $key, 'override_' ) === 0 && strlen( $value ) > 0 ) {
+                    $_SESSION[ $key ] = $value;
+                }
             }
+
+            $config->volunteer_routing_enabled          = strpos( $data->volunteer_routing, "volunteers" ) >= 0;
+            $config->volunteer_routing_redirect         = $data->volunteer_routing == "volunteers_redirect";
+            $config->volunteer_routing_redirect_id      = $config->volunteer_routing_redirect ? $data->volunteers_redirect_id : 0;
+            $config->forced_caller_id_enabled           = isset( $data->forced_caller_id ) && strlen( $data->forced_caller_id ) > 0;
+            $config->forced_caller_id_number            = $config->forced_caller_id_enabled ? $data->forced_caller_id : SpecialPhoneNumber::UNKNOWN;
+            $config->call_timeout                       = isset( $data->call_timeout ) && strlen( $data->call_timeout > 0 ) ? intval( $data->call_timeout ) : 20;
+            $config->volunteer_sms_notification_enabled = isset( $data->volunteer_sms_notification ) && $data->volunteer_sms_notification != "no_sms";
+            $config->call_strategy                      = isset( $data->call_strategy ) ? intval( $data->call_strategy ) : $config->call_strategy;
+            $config->primary_contact_number_enabled     = isset( $data->primary_contact ) && strlen( $data->primary_contact ) > 0;
+            $config->primary_contact_number             = $config->primary_contact_number_enabled ? $data->primary_contact : "";
+            $config->primary_contact_email_enabled      = isset( $data->primary_contact_email ) && strlen( $data->primary_contact_email ) > 0;
+            $config->primary_contact_email              = $config->primary_contact_email_enabled ? $data->primary_contact_email : "";
+            $config->moh                                = isset( $data->moh ) && strlen( $data->moh ) > 0 ? $data->moh : $config->moh;
+            $config->moh_count                          = count( explode( ",", $config->moh ) );
         }
-
-        $config->volunteer_routing_enabled = strpos($data->volunteer_routing, "volunteers") >= 0;
-        $config->volunteer_routing_redirect = $data->volunteer_routing == "volunteers_redirect";
-        $config->volunteer_routing_redirect_id = $config->volunteer_routing_redirect ? $data->volunteers_redirect_id : 0;
-        $config->forced_caller_id_enabled = isset($data->forced_caller_id) && strlen($data->forced_caller_id) > 0;
-        $config->forced_caller_id_number = $config->forced_caller_id_enabled ? $data->forced_caller_id : SpecialPhoneNumber::UNKNOWN;
-        $config->call_timeout = isset($data->call_timeout) && strlen($data->call_timeout > 0) ? intval($data->call_timeout) : 20;
-        $config->volunteer_sms_notification_enabled = isset($data->volunteer_sms_notification) && $data->volunteer_sms_notification != "no_sms";
-        $config->call_strategy = isset($data->call_strategy) ? intval($data->call_strategy) : $config->call_strategy;
-        $config->primary_contact_number_enabled = isset($data->primary_contact) && strlen($data->primary_contact) > 0;
-        $config->primary_contact_number = $config->primary_contact_number_enabled ? $data->primary_contact : "";
-        $config->primary_contact_email_enabled = isset($data->primary_contact_email) && strlen($data->primary_contact_email) > 0;
-        $config->primary_contact_email = $config->primary_contact_email_enabled ? $data->primary_contact_email : "";
-        $config->moh = isset($data->moh) && strlen($data->moh) > 0 ? $data->moh : $config->moh;
-        $config->moh_count = count(explode(",", $config->moh));
+        return $config;
     }
-
-    return $config;
 }
 
 function getHelplineData($service_body_id, $data_type = DataType::YAP_DATA) {
@@ -704,8 +711,16 @@ function sort_on_field(&$objects, $on, $order = 'ASC') {
     usort($objects, create_function('$a,$b', $comparer));
 }
 
-function getHelplineBMLTRootServer() {
-    return has_setting('helpline_bmlt_root_server') ? setting('helpline_bmlt_root_server') : $GLOBALS['bmlt_root_server'];
+function getHelplineBMLTRootServer($managed = true) {
+    if (!$managed && has_setting('helpline_bmlt_root_server')
+        && has_setting('helpline_use_tomato')
+        && setting('helpline_use_tomato')) {
+        return 'https://tomato.na-bmlt.org/main_server';
+    } elseif (has_setting('helpline_bmlt_root_server')) {
+        return setting( 'helpline_bmlt_root_server' );
+    } else {
+        return $GLOBALS['bmlt_root_server'];
+    }
 }
 
 function auth_bmlt($username, $password, $master = false) {
